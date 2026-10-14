@@ -1,6 +1,7 @@
 """Offline assistant extension. No network client and no live sending capability."""
 import json
 import re
+import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from flask import Blueprint, render_template, request, session, redirect, url_for, flash, abort
@@ -77,6 +78,28 @@ def draft(name, category, state, language):
     action='Could we confirm what you need for your quotation?' if state=='Waiting for quotation' else 'Do you have any questions about our offer?' if state in ['Quotation received','Needs follow-up'] else 'How can we help with your enquiry?'
     return f'Hi {name}, this is MYWAY. Following up on {topic}. {action}'
 
+def parse_pasted_chat(text, end_time):
+    """Require explicit speakers; never guess direction from WhatsApp display names."""
+    if not text.strip() or len(text)>30000:
+        raise ValueError('请粘贴聊天内容，最多 30,000 个字符。')
+    messages=[]
+    for line in text.splitlines():
+        if not line.strip(): continue
+        match=re.match(r'^\s*(客户|Customer|MYWAY|我|Me)\s*[:：]\s*(.*)$',line,re.I)
+        if match:
+            body=match.group(2).strip()
+            if not body: raise ValueError('每条消息必须有内容。')
+            direction='inbound' if match.group(1).lower() in ['客户','customer'] else 'outbound'
+            messages.append(dict(id=uuid.uuid4().hex,text=body,direction=direction))
+        elif messages:
+            messages[-1]['text']+='\n'+line
+        else:
+            raise ValueError('请在消息前加「客户:」或「我:」，让系统分清谁说的话。')
+    if not messages: raise ValueError('没有可分析的消息。')
+    for i,m in enumerate(messages):
+        m['timestamp']=(end_time-timedelta(seconds=len(messages)-1-i)).isoformat()
+    return messages
+
 def install_assistant(app,db,login_required):
     with db() as c:
         c.executescript('''
@@ -84,6 +107,7 @@ def install_assistant(app,db,login_required):
         CREATE TABLE IF NOT EXISTS assistant_messages(id TEXT PRIMARY KEY,chat_id TEXT NOT NULL REFERENCES assistant_chats(id),timestamp TEXT NOT NULL,direction TEXT NOT NULL,payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS assistant_queue(id INTEGER PRIMARY KEY,chat_id TEXT NOT NULL REFERENCES assistant_chats(id),language TEXT NOT NULL,text TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'Pending',created TEXT NOT NULL,reviewer INTEGER,reviewed TEXT);
         CREATE UNIQUE INDEX IF NOT EXISTS assistant_one_pending ON assistant_queue(chat_id) WHERE status='Pending';
+        CREATE TABLE IF NOT EXISTS assistant_imports(chat_id TEXT PRIMARY KEY REFERENCES assistant_chats(id),created TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS assistant_summaries(day TEXT PRIMARY KEY,cutoff TEXT NOT NULL,payload TEXT NOT NULL);
         ''')
     def chats(c,at=None):
@@ -133,7 +157,23 @@ def install_assistant(app,db,login_required):
         if request.method=='POST':
             f=request.form
             with db() as c:
-                if f.get('action')=='samples': import_samples(c); flash('Fictional chats loaded. Your existing CRM records were not changed.')
+                if f.get('action')=='paste':
+                    try:
+                        name=f.get('name','').strip(); language=f.get('language')
+                        if not name or len(name)>200: raise ValueError('请填写客户名称，最多 200 个字符。')
+                        if language not in ['en','zh','ms']: raise ValueError('请选择草稿语言。')
+                        end=datetime.fromisoformat(f.get('chat_date','')).replace(tzinfo=TZ)
+                        if end>now(): raise ValueError('聊天时间不能晚于现在。')
+                        messages=parse_pasted_chat(f.get('conversation',''),end)
+                        chat_id='paste-'+uuid.uuid4().hex
+                        c.execute('INSERT INTO assistant_chats(id,name,language) VALUES(?,?,?)',(chat_id,name,language))
+                        c.execute('INSERT INTO assistant_imports VALUES(?,?)',(chat_id,now().isoformat()))
+                        for m in messages:
+                            c.execute('INSERT INTO assistant_messages VALUES(?,?,?,?,?)',(m['id'],chat_id,m['timestamp'],m['direction'],json.dumps(m,ensure_ascii=False)))
+                        flash('聊天已保存并分析。请审核建议；没有发送任何消息。')
+                    except ValueError as e:
+                        flash(str(e) or '请填写有效的聊天日期和时间。')
+                elif f.get('action')=='samples': import_samples(c); flash('Fictional chats loaded. Your existing CRM records were not changed.')
                 else:
                     chat=next((r for r in chats(c) if r['id']==f.get('chat_id')),None)
                     if not chat: abort(404)
@@ -152,7 +192,7 @@ def install_assistant(app,db,login_required):
             return redirect(url_for('assistant'))
         generate_due()
         with db() as c: rows=chats(c)
-        return render_template('assistant.html',rows=rows,categories=CATEGORIES,states=STATES)
+        return render_template('assistant.html',rows=rows,categories=CATEGORIES,states=STATES,chat_date=now().strftime('%Y-%m-%dT%H:%M'))
     @app.route('/assistant/queue',methods=['GET','POST'])
     @login_required
     def assistant_queue():
@@ -176,5 +216,5 @@ def install_assistant(app,db,login_required):
         return render_template('assistant_summary.html',rows=rows,preview=preview)
     @app.cli.command('assistant-summary')
     def summary_command():
-        click.echo('5 PM summary saved.' if generate_due() else 'No sample chats, not due yet, or already saved today.')
+        click.echo('5 PM summary saved.' if generate_due() else 'No chats, not due yet, or already saved today.')
     app.assistant_summary=generate_due

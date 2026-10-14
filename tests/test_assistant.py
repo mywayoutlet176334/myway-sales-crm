@@ -89,6 +89,28 @@ class AssistantIntegrationTests(unittest.TestCase):
         self.post('/assistant',action='review',chat_id='sample-other',category='Karaoke',state='Waiting for quotation')
         self.post('/assistant',action='draft',chat_id='sample-other',language='en')
         with self.app.db() as c: self.assertIn('Karaoke',c.execute('SELECT text FROM assistant_queue').fetchone()[0])
+    def test_pasted_chat_analysis_and_manual_draft(self):
+        response=self.post('/assistant',action='paste',name='Paste Test',language='zh',chat_date='2026-01-01T10:00',conversation='客户: 我想买 karaoke，请报价。\n我: Our offer is RM 5000, package includes installation.\n客户: Thanks')
+        self.assertIn(b'Paste Test',response.data)
+        with self.app.db() as c:
+            chat=c.execute("SELECT * FROM assistant_chats WHERE id LIKE 'paste-%'").fetchone()
+            messages=[json.loads(r[0]) for r in c.execute('SELECT payload FROM assistant_messages WHERE chat_id=?',(chat['id'],))]
+            self.assertEqual([m['direction'] for m in messages],['inbound','outbound','inbound'])
+            self.assertEqual(analyze(messages)['state'],'Customer replied')
+            self.assertEqual(c.execute('SELECT COUNT(*) FROM customers').fetchone()[0],1)
+        self.post('/assistant',action='draft',chat_id=chat['id'],language='zh')
+        self.post('/assistant/queue',id='1',action='approve',text='Reviewed manual message')
+        self.assertIn(b'Reviewed manual message',self.client.get('/assistant/queue').data)
+    def test_paste_validation_does_not_save_partial_chat(self):
+        for content,stamp in [('unlabelled text','2026-01-01T10:00'),('客户: hi','2099-01-01T10:00'),('客户: hi','invalid'),('x'*30001,'2026-01-01T10:00')]:
+            self.post('/assistant',action='paste',name='Test',language='en',chat_date=stamp,conversation=content)
+        with self.app.db() as c:
+            self.assertEqual(c.execute('SELECT COUNT(*) FROM assistant_chats').fetchone()[0],0)
+    def test_paste_text_is_escaped(self):
+        response=self.post('/assistant',action='paste',name='<script>alert(1)</script>',language='en',chat_date='2026-01-01T10:00',conversation='客户: <script>alert(2)</script>')
+        self.assertNotIn(b'<script>',response.data)
+        self.assertIn(b'&lt;script&gt;',response.data)
+
     def test_no_empty_summary_before_loading_chats(self):
         with patch('assistant.now',return_value=AT): self.assertFalse(self.app.assistant_summary())
 

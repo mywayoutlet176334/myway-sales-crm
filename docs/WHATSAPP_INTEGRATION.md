@@ -1,5 +1,7 @@
 # MYWAY WhatsApp assistant: plan and safe prototype
 
+**Free manual route now available:** Sales Assistant accepts manually pasted conversations with explicit customer/business speaker labels. These are saved privately and analyzed offline. Approved drafts can be copied into WhatsApp for manual sending. Summaries include both sample and pasted chats. No official connection or automatic sender is enabled. See the Chinese step-by-step section in README. The original sample-stage description below applies to the fictional examples; the prototype now also accepts manually entered text.
+
 ## Your current CRM is preserved
 
 The original customers, quotations, PDFs, login and Day 2/5/10 reminder code remain in place. The assistant creates additional SQLite tables with `CREATE TABLE IF NOT EXISTS`. It does not replace existing tables or automatically turn uncertain conversations into quotations. The sample conversations have no phone numbers, are labelled Demo, and are separate from real CRM records. Existing uncommitted application files were kept.

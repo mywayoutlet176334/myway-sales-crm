@@ -102,3 +102,15 @@ Tests use isolated temporary databases and cover authentication/CSRF/login throt
 Your existing CRM is preserved. New **Sales Assistant**, **Approval Queue** and **Daily Summary** pages use fictional conversations only. Load samples from the assistant page, review category/quotation suggestions, then prepare English, Chinese or Bahasa Melayu drafts. Approving a draft does not send it. There is no live WhatsApp connection or connected AI model in this stage.
 
 Read [the integration plan and simple next steps](docs/WHATSAPP_INTEGRATION.md) for Coexistence requirements, Web/Desktop synchronization limits, costs, official onboarding stages and the 5 PM timer. For local automatic summaries, run `.venv/bin/python summary_worker.py` alongside the server (Windows: `.\.venv\Scripts\python.exe summary_worker.py`). Keep both running; an offline computer cannot generate an exact-time summary. No additional dependencies or API keys are required for sample mode.
+
+## 免费路线：粘贴聊天分析
+
+在自己的电脑运行 CRM 不需要 WhatsApp API 或付费 AI。登录后打开 **Sales Assistant**：
+
+1. 从 WhatsApp 复制重要聊天文字。
+2. 输入客户名称，把每条消息标成 `客户:` 或 `我:`，按先后顺序粘贴。
+3. 选择最后一条消息的马来西亚时间，点击 **保存并分析聊天**。
+4. 检查分类和报价线索，选择草稿语言并提交审核。
+5. 在 **Approval Queue** 修改并批准草稿，选中文字复制到 WhatsApp，自己按发送。
+
+使用本地规则分析，不会上传给外部 AI，也不会自动读取 WhatsApp。粘贴内容存入私有数据库，必须保护电脑和备份。每次粘贴建立独立对话，不会自动合并客户；不要重复提交。分析只知道输入的消息，不能确认完整历史、已读或实际送达。整段对话使用所选时间附近的顺序时间，因此提醒和日汇总只是参考。PDF 不会随文字导入，正式报价和 Day 2/5/10 提醒仍需在 Quotations 登记。日汇总同时包含示范及手动导入的聊天。
